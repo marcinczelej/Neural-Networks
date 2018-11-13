@@ -64,7 +64,6 @@ def complete_forward(X, parameters):
     caches = []
     
     for l in range(1, LEN):
-        print(l)
         A_prev, cache= forward_activation(A_prev, parameters["W" + str(l)], parameters["b" + str(l)], "relu")
         caches.append(cache)
         
@@ -117,7 +116,6 @@ def layer_backward(dA, cache, activation_function):
     (activation_cache, linear_cache) = cache
     
     dZ = activation_backward(dA, activation_cache, activation_function)
-    print(" dZ = " + str(dZ))
     A_prev, dW, db = linear_backward(dZ, linear_cache)
     
     return A_prev, dW, db
@@ -130,20 +128,14 @@ def backward_propagation(A_last, Y, caches):
     
     LEN = len(caches)
     
-    print(" LEN = " + str(LEN))
-    print(caches)
     current_cache = caches[LEN-1]
     Y = Y.reshape(A_last.shape)
     
     changes["dA" + str(LEN-1)], changes["dW" + str(LEN)], changes["db" + str(LEN)] = layer_backward(dA, current_cache, "sigmoid")
     dA_prev = changes["dA" + str(LEN-1)]
-    print(" grads[dA + str(L-1)] = " + str(changes["dA" + str(LEN-1)]))
-    print(" grads[dW + str(L)] = " + str(changes["dW" + str(LEN)]))
-    print(" grads[db + str(L)] = " + str(changes["db" + str(LEN)]))
     
     
     for l in reversed(range(LEN-1)):
-        print(" l = " + str(l))
         current_cache = caches[l]
         changes["dA" + str(l)], changes["dW" + str(l+1)], changes["db" + str(l+1)] = layer_backward(dA_prev, current_cache, "relu")
         dA_prev = changes["dA" + str(l)]
