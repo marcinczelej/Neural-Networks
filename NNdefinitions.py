@@ -1,7 +1,7 @@
 import numpy as np
 import keras as ks
 import tensorflow as tf
-
+import math 
 
 """
 Preliminary step 
@@ -44,19 +44,21 @@ def initialize_weights(layers_dimensions):
         print(layer)
         parameters["W" + str(layer)] = np.random.randn(layers_dimensions[layer], layers_dimensions[layer-1])*np.sqrt(1/layers_dimensions[layer-1])
         parameters["b" + str(layer)] = np.zeros((layers_dimensions[layer], 1))
-        
-        """
-        parameters["V_db" + str(layer)] = np.zeros((layers_dimensions[layer], 1))
-        parameters["V_dW" + str(layer)] = np.zeros((layers_dimensions[layer], layers_dimensions[layer-1]))
-        parameters["S_db" + str(layer)] = np.zeros((layers_dimensions[layer], 1))
-        parameters["S_dW" + str(layer)] = np.zeros((layers_dimensions[layer], layers_dimensions[layer-1]))
-        parameters["V_db_norm" + str(layer)] = np.zeros((layers_dimensions[layer], 1))
-        parameters["V_dW_norm" + str(layer)] = np.zeros((layers_dimensions[layer], layers_dimensions[layer-1]))
-        parameters["S_db_norm" + str(layer)] = np.zeros((layers_dimensions[layer], 1))
-        parameters["S_dW_norm" + str(layer)] = np.zeros((layers_dimensions[layer], layers_dimensions[layer-1]))
-        """
     
     return parameters
+
+def initializeAdam_parameters(parameters):
+    
+    v = {}
+    s = {}
+    
+    for l in range(len(parameters) // 2):
+        v["dW" + str(l+1)] = np.zeros((parameters["W" + str(l+1)].shape))
+        v["db" + str(l+1)] = np.zeros((parameters["b" + str(l+1)].shape))
+        s["dW" + str(l+1)] = np.zeros((parameters["W" + str(l+1)].shape))
+        s["db" + str(l+1)] = np.zeros((parameters["b" + str(l+1)].shape))
+        
+    return v, s
 
 #---------------------------------------forward_part----------------------------------------
 
@@ -69,31 +71,35 @@ def forward_linear(A_prev, W, b):
     
     return Z, cache
 
-def forward_activation(A_prev, W, b, activation_function):
+def forward_activation(A_prev, W, b, activation_function, keep_prob):
     
     if activation_function== "relu":
         #print("relu")
         Z, linear_cache = forward_linear(A_prev, W, b)
         A = np.maximum(0, Z)
-    
+        # DROPOUT START
+        D = np.random.rand(A.shape[0], A.shape[1])
+        D = (D < keep_prob)
+        A = np.multiply(A, D)
+        A /= keep_prob
+        # DROPOUT END
+        
     if activation_function == "sigmoid":
         #print("sigmoid")
         Z, linear_cache = forward_linear(A_prev, W, b)
         A = np.divide(1, 1 + np.exp(-Z))
+        
     if activation_function == "softmax":
         #print("softmax")
         Z, linear_cache = forward_linear(A_prev, W, b)
-        print("Z.shape = " + str(Z.shape))
-        
+        #print("Z.shape = " + str(Z.shape))
         T = np.exp(Z)  # e to the power of Z
         T_tot = np.sum(T,axis=0)  # Get the total of T
-        print("T_tot.shape = " + str(T_tot.shape))
-        print("   T_tot = " + str(T_tot))
+        #print("T_tot.shape = " + str(T_tot.shape))
+        #print("   T_tot = " + str(T_tot))
         A = np.divide(T,T_tot)  # Normalize with the total of T
-        
     
-    cache = Z
-    
+    cache = (Z, A)
     caches = (cache, linear_cache)
     
     return A, caches
@@ -108,18 +114,19 @@ def compute_cost(A_last, Y):
     return cost
 
 
-def complete_forward(X, parameters):
+def complete_forward(X, parameters, keep_prob):
     
     LEN = len(parameters) // 2
+    #LEN = len(parameters) // 10
     A_prev = X
     
     caches = []
     
     for l in range(1, LEN):
-        A_prev, cache= forward_activation(A_prev, parameters["W" + str(l)], parameters["b" + str(l)], "relu")
+        A_prev, cache= forward_activation(A_prev, parameters["W" + str(l)], parameters["b" + str(l)], "relu", keep_prob)
         caches.append(cache)
         
-    A_last, cache = forward_activation(A_prev, parameters["W" + str(LEN)], parameters["b" + str(LEN)], "softmax")
+    A_last, cache = forward_activation(A_prev, parameters["W" + str(LEN)], parameters["b" + str(LEN)], "softmax", keep_prob)
     caches.append(cache)
     
     return A_last, caches
@@ -166,27 +173,32 @@ def linear_backward(dZ, cache):
     
     return dA_prev, dW, db
 
-def activation_backward(dA, activation_cache, linear_cache, activation_function):
+def activation_backward(dA, activation_cache, linear_cache, activation_function, Y):
+    
+    (Z, A) = activation_cache
     
     if activation_function == "relu":
-        dZ = relu_backward(dA, activation_cache)
+        dZ = relu_backward(dA, Z)
     
     if activation_function == "sigmoid":
-        dZ = sigmoid_backward(dA, activation_cache)
+        dZ = sigmoid_backward(dA, Z)
     
     if activation_function == "softmax":
-        dZ = softmax_backward(dA, activation_cache)
-    
+        #print("A.shape = " + str(A.shape))
+        #print("Y.shape = " + str(Y.shape))
+        dZ = A - Y
+        
+    assert (dZ.shape == Z.shape)
     return dZ
 
-def layer_backward(dA, cache, activation_function):
+def layer_backward(dA, cache, activation_function, Y = None):
     
     (activation_cache, linear_cache) = cache
     
-    dZ = activation_backward(dA, activation_cache, linear_cache, activation_function)
-    A_prev, dW, db = linear_backward(dZ, linear_cache)
+    dZ = activation_backward(dA, activation_cache, linear_cache, activation_function, Y)
+    dA_prev, dW, db = linear_backward(dZ, linear_cache)
     
-    return A_prev, dW, db
+    return dA_prev, dW, db
 
 def backward_propagation(A_last, Y, caches):
     
@@ -199,13 +211,13 @@ def backward_propagation(A_last, Y, caches):
     
     current_cache = caches[LEN-1]
     
-    changes["dA" + str(LEN-1)], changes["dW" + str(LEN)], changes["db" + str(LEN)] = layer_backward(dA, current_cache, "softmax")
+    changes["dA" + str(LEN-1)], changes["dW" + str(LEN)], changes["db" + str(LEN)] = layer_backward(dA, current_cache, "softmax", Y)
     dA_prev = changes["dA" + str(LEN-1)]
     
     
     for l in reversed(range(LEN-1)):
         current_cache = caches[l]
-        changes["dA" + str(l)], changes["dW" + str(l+1)], changes["db" + str(l+1)] = layer_backward(dA_prev, current_cache, "relu")
+        changes["dA" + str(l)], changes["dW" + str(l+1)], changes["db" + str(l+1)] = layer_backward(dA_prev, current_cache, "relu", None )
         dA_prev = changes["dA" + str(l)]
         
     return changes
@@ -222,25 +234,32 @@ def update_parameters(gradients, parameters, learning_rate, epoch):
     
     return parameters
 
-def update_parametersADAM(gradients, parameters, learning_rate, epoch, Beta_1, Beta_2):  # czemu psuje zobaczyc
+def update_parametersADAM(gradients, parameters, learning_rate, t, v, s, beta1, beta2):  # czemu psuje zobaczyc
     
-    LEN = len(parameters) // 2
-    Epsilon = 0.00000001
+    epsilon = 0.00000001
     
-    learning_rate = np.power(0.97, epoch)*learning_rate
+    learning_rate = np.power(0.97, t)*learning_rate
     
-    for l in range(LEN):
-        parameters["V_db" + str(l+1)] = Beta_1*parameters["V_db" + str(l+1)] + (1-Beta_1)*gradients["db" + str(l+1)]
-        parameters["V_dW" + str(l+1)] = Beta_1*parameters["V_dW" + str(l+1)] + (1-Beta_1)*gradients["dW" + str(l+1)]
-        parameters["S_db" + str(l+1)] = Beta_2*parameters["S_db" + str(l+1)] + (1-Beta_2)*np.power(gradients["db" + str(l+1)],2)
-        parameters["S_dW" + str(l+1)] = Beta_2*parameters["S_dW" + str(l+1)] + (1-Beta_2)*np.power(gradients["dW" + str(l+1)],2)
-        
-        parameters["V_db_norm" + str(l+1)] = np.divide(parameters["V_db_norm" + str(l+1)], 1 - np.power(Beta_1, epoch))
-        parameters["V_dW_norm" + str(l+1)] = np.divide(parameters["V_dW_norm" + str(l+1)], 1 - np.power(Beta_1, epoch))
-        parameters["S_db_norm" + str(l+1)] = np.divide(parameters["S_db_norm" + str(l+1)], 1 - np.power(Beta_2, epoch))
-        parameters["S_dW_norm" + str(l+1)] = np.divide(parameters["S_dW_norm" + str(l+1)], 1 - np.power(Beta_2, epoch))
-        
-        parameters["W" + str(l+1)] = parameters["W" + str(l+1)] - learning_rate*parameters["V_dW_norm" + str(l+1)]/np.sqrt(parameters["S_dW_norm" + str(l+1)]+Epsilon)
-        parameters["b" + str(l+1)] = parameters["b" + str(l+1)] - learning_rate*parameters["V_db_norm" + str(l+1)]/np.sqrt(parameters["S_db_norm" + str(l+1)]+Epsilon)
+    L = len(parameters) // 2                 # number of layers in the neural networks
+    v_corrected = {}                         # Initializing first moment estimate, python dictionary
+    s_corrected = {}                         # Initializing second moment estimate, python dictionary
     
-    return parameters
+    for l in range(L):
+
+        v["dW" + str(l+1)] = beta1*v["dW" + str(l+1)] + (1- beta1)*gradients["dW" + str(l+1)]
+        v["db" + str(l+1)] = beta1*v["db" + str(l+1)] + (1- beta1)*gradients["db" + str(l+1)]
+
+        v_corrected["dW" + str(l+1)] = np.divide(v["dW" + str(l+1)], 1- math.pow(beta1, t+l))
+        v_corrected["db" + str(l+1)] = np.divide(v["db" + str(l+1)], 1- math.pow(beta1, t+l))
+
+        s["dW" + str(l+1)] = beta2*s["dW" + str(l+1)] + (1- beta2)*np.power(gradients["dW" + str(l+1)],2)
+        s["db" + str(l+1)] = beta2*s["db" + str(l+1)] + (1- beta2)*np.power(gradients["db" + str(l+1)],2)
+
+        s_corrected["dW" + str(l+1)] = np.divide(s["dW" + str(l+1)], 1- math.pow(beta2, t+l))
+        s_corrected["db" + str(l+1)] = np.divide(s["db" + str(l+1)], 1- math.pow(beta2, t+l))
+
+        parameters["W" + str(l+1)] = parameters["W" + str(l+1)] - learning_rate*np.divide(v_corrected["dW" + str(l+1)], np.sqrt(s_corrected["dW" + str(l+1)] + epsilon))
+        parameters["b" + str(l+1)] = parameters["b" + str(l+1)] - learning_rate*np.divide(v_corrected["db" + str(l+1)], np.sqrt(s_corrected["db" + str(l+1)] + epsilon))
+        ### END CODE HERE ###
+
+    return parameters, v, s

@@ -7,7 +7,7 @@ mnist = tf.keras.datasets.mnist
 
 (x_train, y_train),(x_test, y_test) = mnist.load_data()
 
-layer_dims = [784, 3,4, 10]
+layer_dims = [784, 150, 10]
 
 def one_hot_matrix(labels, C):
     """
@@ -44,13 +44,36 @@ def one_hot_matrix(labels, C):
     
     return one_hot
 
+def prediction(X, y, parameters):
+    
+    m = X.shape[1]
+    n = len(parameters) // 2
+    p = np.zeros((1,m))
+    
+    # Forward propagation
+    probas, caches = NNdefinitions.complete_forward(X, parameters, 1)
+    
+    # convert probas to 0/1 predictions
+    for i in range(0, probas.shape[1]):
+        if probas[0,i] > 0.5:
+            p[0,i] = 1
+        else:
+            p[0,i] = 0
+    
+    #print results
+    print("predictions: " + str(p))
+    print("true labels: " + str(y))
+    print("Accuracy: "  + str(np.sum((p == y)/m)))
+        
+    return p
+
 def fullNeuralNetwork(X, Y, learning_rate, layer_dims, epochs):
     
     parameters = NNdefinitions.initialize_weights(layer_dims)
     
     costs = []
     
-    mini_bacth_size = 30000
+    mini_bacth_size = 256
         
     miniBatchesAmount = int(len(X[0, :])/mini_bacth_size)
     print(" miniBatchesAmount = " + str(miniBatchesAmount))
@@ -61,15 +84,16 @@ def fullNeuralNetwork(X, Y, learning_rate, layer_dims, epochs):
             X_batch = X[:, batch*mini_bacth_size: (batch+1)*mini_bacth_size]
             Y_batch = Y[:, batch*mini_bacth_size: (batch+1)*mini_bacth_size]
         
-            A_last, cache = NNdefinitions.complete_forward(X_batch, parameters)
+            A_last, cache = NNdefinitions.complete_forward(X_batch, parameters, 1)
     
             cost = NNdefinitions.compute_cost(A_last, Y_batch)
             costs.append(cost)
     
             gradients = NNdefinitions.backward_propagation(A_last, Y_batch, cache)
-    
             parameters = NNdefinitions.update_parameters(gradients, parameters, learning_rate, epoch)
-            print(" epoch : " + str(epoch) + " cost : " + str(cost))
+            if  epoch % 10 == 0 and batch == 1 :
+                print ("Cost after iteration %i: %f" %(epoch, cost))
+                costs.append(cost)             
         
      # plot the cost
     plt.plot(np.squeeze(costs))
@@ -77,9 +101,13 @@ def fullNeuralNetwork(X, Y, learning_rate, layer_dims, epochs):
     plt.xlabel('iterations (per tens)')
     plt.title("Learning rate =" + str(learning_rate))
     plt.show()
+    return parameters
 
 train_x_flatten = x_train.reshape(x_train.shape[0], -1).T 
 train_x = train_x_flatten/255.
+
+test_x_flatten = x_test.reshape(x_test.shape[0], -1).T 
+x_test = test_x_flatten/255.
 
 train_y = y_train
 print(train_y.shape)
@@ -91,4 +119,5 @@ print (y_train[:, 0])
 
 print( " train_x = " + str(train_x.shape))
 print( " y_train = " + str(y_train.shape))
-fullNeuralNetwork(train_x, y_train, 0.01, layer_dims, 1000)
+parameters = fullNeuralNetwork(train_x, y_train, 0.1, layer_dims, 300)
+prediction(x_test, y_test, parameters)
